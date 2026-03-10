@@ -1,6 +1,6 @@
 # Robust Trasformer Based Intrusion Detection
 
-This is an Implementation of a Transformer Based Network Intrusion Detection AI based on the Paper by Wu et Al.
+This is an Implementation of a Transformer Based Network Intrusion Detection AI
 
 ## Training / Test Data
 
@@ -8,7 +8,7 @@ It is recommended to download the [CICIDS2017](https://www.unb.ca/cic/datasets/i
 
 ## Requirements
 
-You will need to install PyTorch to run this Project. Currently only Cuda is supported, however this will likely be updated later on.
+You will need to install PyTorch to run this Project. Currently only Cuda is supported.
 
 ## Usage
 
