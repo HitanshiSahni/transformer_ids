@@ -3,3 +3,6 @@ data
 pretrained
 *.png
 .ipynb_checkpoints
+out.txt
+*.log
+.env

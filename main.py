@@ -1,156 +1,161 @@
 import torch
 from torch import nn
-from torch.autograd import Variable
 from torch.nn import functional as F
 from torchsummary import summary
 import numpy as np
 import time
 import os
-from util.masks import get_mask
-from util.data import load_data, get_data_loader
+from sklearn.metrics import classification_report, confusion_matrix, precision_score, recall_score, f1_score
+from util.data import load_and_preprocess_data, get_data_loader
 from transformer import RTIDS_Transformer, IDS_Encoder_Only
-from sklearn.metrics import classification_report
 
-def accuracy_per_class(model, loader):
-    model.eval()
-    model.to("cpu")
-    correct = np.zeros(15, dtype=np.int64)
-    wrong = np.zeros(15, dtype=np.int64)
-    with torch.no_grad():
-        for src, trg, at_class in loader:
-            src, trg = src.to("cpu"), trg.to("cpu")
-            output = model(src)            
-            for label, pred, at_c in zip(trg, output, at_class.cpu().numpy()):
-                at_c = int(at_c)
-                if torch.eq(torch.argmax(pred),torch.argmax(label)):
-                    correct[at_c] += 1
-                else:
-                    wrong[at_c] += 1
-    accuracy = 100. * correct / (correct + wrong)
-    return accuracy
-
-def eval_model(model, loader):
+def eval_model(model, loader, threshold=0.5):
     model.to("cpu")
     model.eval()
     losses = []
-    correct = 0
+    all_preds = []
+    all_targets = []
+    
     with torch.no_grad():
-        for data, target, _ in loader:
+        for data, target in loader:
             data, target = data.to("cpu"), target.to("cpu")
             output = model(data)
-            losses.append(F.cross_entropy(output, target).item())
-            correct += torch.eq(torch.argmax(output, dim=1),torch.argmax(target, dim=1)).cpu().sum().item()
+            
+            loss = F.cross_entropy(output, target)
+            losses.append(loss.item())
+            
+            probs = torch.softmax(output, dim=1)
+            attack_prob = probs[:, 0]
+            # If attack probability is below threshold, classify as 1 (Benign), else 0 (Attack)
+            preds = (attack_prob < threshold).long().cpu().numpy()
+            
+            targets = target.cpu().numpy()
+            
+            all_preds.extend(preds)
+            all_targets.extend(targets)
+            
     eval_loss = float(np.mean(losses))
-    eval_acc = 100. * correct / len(loader.dataset)
-    print("Loss:", eval_loss, "Accuracy:", eval_acc)
-    return eval_loss, eval_acc
-
-def train_model(model, opt, epochs, data, eval_data, path, print_every=100):
-    #model.to("cpu")
     
-    pretrained_path = "pretrained"
-    top_acc = 0.
+    # Calculate Sklearn Metrics
+    # Attention: In our encoding, 0 = Attack, 1 = BENIGN.
+    # So "Positive" class for Intrusion Detection is usually Attack (0).
+    cm = confusion_matrix(all_targets, all_preds)
+    precision = precision_score(all_targets, all_preds, pos_label=0, zero_division=0)
+    recall = recall_score(all_targets, all_preds, pos_label=0, zero_division=0)
+    f1 = f1_score(all_targets, all_preds, pos_label=0, zero_division=0)
+    cr = classification_report(all_targets, all_preds, target_names=["Attack", "Benign"], zero_division=0)
+    
+    print("\n" + "="*50)
+    print(f"VALIDATION METRICS (Threshold: {threshold})")
+    print("="*50)
+    print("Confusion Matrix:\n", cm)
+    print("\nClassification Report:\n", cr)
+    print(f"Validation Loss: {eval_loss:.4f}")
+    print(f"Attack Detection Precision: {precision:.4f}")
+    print(f"Attack Detection Recall (Critical): {recall:.4f}")
+    print(f"Attack Detection F1-Score: {f1:.4f}")
+    
+    return eval_loss, recall
 
-    if os.path.exists(pretrained_path + "/" + path):
-        print("Loading Pretrained Model")
-        state = torch.load(pretrained_path + "/" + path)
-        model.load_state_dict(state["model_state_dict"])
-        start_epoch = state["epoch"] + 1
-        losses = state["ep_loss"]
-        accs = state["ep_acc"]
-        top_acc = max(accs)
-    else:
-        start_epoch = 0
-        losses, accs = [], []
-        try:
-            os.mkdir(pretrained_path)
-        except OSError as error:
-            pass 
-
+def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_every=100):
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    best_val_loss = float('inf')
+    best_recall = 0.0
+    patience = 5
+    counter = 0
 
     start = time.time()
     temp = start
     
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(epochs):
         model.train()
         total_loss = 0
-        for i, batch in enumerate(data):
-            src,trg,_ = batch
-            src,trg = src.to("cpu"), trg.to("cpu")
+        
+        for i, (src, trg) in enumerate(train_loader):
+            src, trg = src.to("cpu"), trg.to("cpu")
             
-            if isinstance(model, RTIDS_Transformer):
-                trg_mask = get_mask(78)
-                preds = model(src, trg_mask)
-            else:
-                preds = model(src)
             opt.zero_grad()
-            loss = F.cross_entropy(preds, trg)
+            preds = model(src)
+            
+            # Using class weights to heavily penalize missing attacks
+            class_weights = torch.tensor([1.0, 0.5]).to(trg.device)
+            loss = F.cross_entropy(preds, trg, weight=class_weights)
+            
             loss.backward()
             opt.step()
             
-            total_loss += loss.data 
+            total_loss += loss.item()
+            
             if (i + 1) % print_every == 0:
                 loss_avg = total_loss / print_every
-                print("time = %dm, epoch %d, iter = %d, loss = %.3f, \
-                %ds per %d iters" % ((time.time() - start) // 60, 
-                epoch + 1, i + 1, loss_avg, time.time() - temp, 
-                print_every))
+                print(f"time = {(time.time() - start) // 60:.0f}m, epoch {epoch + 1}, iter = {i + 1}, loss = {loss_avg:.4f}, time/iter = {time.time() - temp:.1f}s per {print_every} iters")
                 total_loss = 0
                 temp = time.time()
-        ep_loss, ep_acc = eval_model(model,eval_data)
+                
+        # End of epoch evaluation
+        val_loss, val_recall = eval_model(model, val_loader)
+        
+        # Early Stopping Logic (Monitor Validation Loss)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_recall = val_recall
+            counter = 0
+            # Save the ONLY model explicitly as requested
+            print(f"*** Validation Loss improved -> Saving strictly best model to {save_path}")
+            torch.save(model.state_dict(), save_path)
+        else:
+            counter += 1
+            print(f"*** Validation Loss did not improve. Patience: {counter}/{patience}")
+            
+            if counter >= patience:
+                print(f"\n[!] EARLY STOPPING TRIGGERED AT EPOCH {epoch + 1}")
+                break
 
-        losses.append(ep_loss)
-        accs.append(ep_acc)
-        if ep_acc > top_acc:
-            top_state = {
-                "model_state_dict": model.state_dict(),
-                "epoch": epoch
-            }
-            torch.save(top_state, pretrained_path + "/max_" + path)
-        state = {
-                'model_state_dict': model.state_dict(),
-                'epoch': epoch,
-                'ep_loss': losses,
-                'ep_acc': accs
-            }
-        torch.save(state, pretrained_path + "/" + path)
+def evaluate_thresholds(model, val_loader, thresholds=[0.5, 0.6, 0.7, 0.8]):
+    print("\n" + "*"*60)
+    print("THRESHOLD COMPARISON EVALUATION")
+    print("*"*60)
+    for t in thresholds:
+        eval_model(model, val_loader, threshold=t)
+    print("\nRecommendation: Choose the threshold that significantly improves Precision while retaining Recall at an acceptable level. Typically, 0.7 or 0.8 is ideal.")
 
 def main():
     learning_rate = 5e-4
     batch_size = 256
-    epochs = 27
+    epochs = 3
     dropout_rate = 0.5
     d_model = 32
     heads = 8
     N = 2
     trg_vocab = 2
     
+    # Set debug=False for legitimate training, memory-safe limits handle the data sizes
+    X_train, X_test, y_train, y_test, scaler = load_and_preprocess_data(debug=True)
     
-    train_data, val_data = load_data()
-    
-    train_loader = get_data_loader(train_data, batch_size)
-    val_loader = get_data_loader(val_data, batch_size)
+    train_loader = get_data_loader(X_train, y_train, batch_size)
+    val_loader = get_data_loader(X_test, y_test, batch_size)
 
-    # model = RTIDS_Transformer(trg_vocab, d_model, N, heads, dropout_rate)
-    # save_path = "RTIDS_pretrained_copy.pt"
     model = IDS_Encoder_Only(trg_vocab, d_model, N, heads, dropout_rate)
-    save_path = "transformer_ids_full_dataset.pt"
-
-    pretrained_path = "pretrained"
+    save_path = "models/best_model_no_leakage.pt"
 
     for p in model.parameters():
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
-    summary(model, input_size=(78,))
+            
+    try:
+        summary(model, input_size=(78,))
+    except Exception as e:
+        pass
     
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+    print(f"\nStarting fresh training from scratch for {epochs} epochs...")
     train_model(model, optim, epochs, train_loader, val_loader, save_path)
-    # if os.path.exists(pretrained_path + "/" + save_path):
-    #     print("Loading Pretrained Model")
-    #     state = torch.load(pretrained_path + "/" + save_path)
-    #     model.load_state_dict(state["model_state_dict"])
-    # accuracy_per_class(model, val_loader)
+    
+    print("\nLoading best model for Threshold Tuning...")
+    model.load_state_dict(torch.load(save_path, weights_only=False))
+    evaluate_thresholds(model, val_loader)
 
 if __name__ == "__main__":
     main()

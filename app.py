@@ -27,10 +27,15 @@ model = IDS_Encoder_Only(trg_vocab, d_model, N, heads, dropout_rate)
 model.eval()
 
 # Load Weights
-MODEL_PATH = "models/transformer_ids_sampled.pt"
+MODEL_PATH = "models/best_model_no_leakage.pt"
+SCALER_PATH = "data/preprocessed/scaler.save"
+
+# Threshold Tuning (Adjustable to favor precision vs recall)
+# 0.5 is balanced. 0.7-0.8 heavily reduces false positives (improves precision).
+THRESHOLD = 0.7
+
 try:
     state = torch.load(MODEL_PATH, map_location=torch.device('cpu'), weights_only=False)
-    # The dictionary was saved wrapped in a 'model_state_dict' key
     if 'model_state_dict' in state:
         model.load_state_dict(state['model_state_dict'])
     else:
@@ -39,35 +44,58 @@ try:
 except Exception as e:
     print(f"Error loading model: {e}")
 
+try:
+    import joblib
+    scaler = joblib.load(SCALER_PATH)
+    print("Scaler loaded successfully.")
+except Exception as e:
+    print(f"Error loading scaler. Inference will fail or be extremely inaccurate! Error: {e}")
+    scaler = None
+
 class FeatureVector(BaseModel):
     features: List[float] = None
 
 @app.post("/predict")
 async def predict_traffic(data: FeatureVector):
-    # If no features provided, mock a 78-column dummy vector
+    # Mock fallback or validation
     if not data.features or len(data.features) != 78:
-        # Mocking an arbitrary numerical distribution
         test_vector = np.random.rand(1, 78).astype(np.float32)
     else:
         test_vector = np.array(data.features, dtype=np.float32).reshape(1, 78)
 
-    # Convert to Tensor
+    # STRICTLY SCALE INPUT (CRITICAL FIX)
+    if scaler is not None:
+        try:
+            test_vector = scaler.transform(test_vector)
+        except Exception as e:
+            print(f"Scaling failed during inference: {e}")
+
     tensor_input = torch.from_numpy(test_vector)
 
-    # Inference without tracking gradients
     with torch.no_grad():
         output = model(tensor_input)
-        # Apply Softmax since we removed it from the model architecture earlier
+        # Apply Softmax strictly during inference
         probabilities = torch.softmax(output, dim=1)
-        predicted_class_idx = torch.argmax(probabilities, dim=1).item()
+        
+        attack_prob = probabilities[0, 0].item()
+        
+        # Predict 0 (Attack) if probability >= THRESHOLD, else 1 (Benign)
+        if attack_prob >= THRESHOLD:
+            predicted_class_idx = 0
+            confidence = attack_prob
+        else:
+            predicted_class_idx = 1
+            confidence = probabilities[0, 1].item()
 
-    classes = ["Benign Traffic", "Suspicious / Attack Traffic"]
+    classes = ["Attack", "Benign"] # 0 = Attack, 1 = Benign
     
     return {
         "prediction": classes[predicted_class_idx],
-        "confidence": float(probabilities[0][predicted_class_idx])
+        "confidence": float(confidence)
     }
 
 @app.get("/")
 def health_check():
     return {"status": "RTIDS Backend Active"}
+
+# Trigger Reload

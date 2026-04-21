@@ -1,39 +1,24 @@
 import React from 'react';
-import ProjectOverview from './components/ProjectOverview';
-import ModelStatus from './components/ModelStatus';
-import ModelTesting from './components/ModelTesting';
-import RealTimeSimulation from './components/RealTimeSimulation';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
+import Landing from './pages/Landing';
+import Simulation from './pages/Simulation';
+import ModelTest from './pages/ModelTest';
 
-const App = () => {
+function App() {
   return (
-    <>
-      <div className="cyber-grid"></div>
-      
-      <nav>
-        <div className="logo">RTIDS // DEMO</div>
-        <div style={{color: 'var(--brand-neon-blue)', fontFamily: 'var(--font-mono)'}}>
-          NETWORK_SECURITY_NODE: ACTIVE
-        </div>
-      </nav>
-
-      <main className="container">
-        <ProjectOverview />
-        
-        <div className="dashboard-grid" style={{marginTop: '30px'}}>
-            {/* Left Column */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-              <ModelStatus />
-              <ModelTesting />
-            </div>
-
-            {/* Right Column */}
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <RealTimeSimulation />
-            </div>
-        </div>
+    <Router>
+      <div className="scanline"></div>
+      <Navbar />
+      <main style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/simulation" element={<Simulation />} />
+          <Route path="/model-test" element={<ModelTest />} />
+        </Routes>
       </main>
-    </>
+    </Router>
   );
-};
+}
 
 export default App;
