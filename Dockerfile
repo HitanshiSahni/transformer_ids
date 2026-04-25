@@ -24,6 +24,9 @@ RUN pip3 install --upgrade pip && \
 # Copy project files.
 COPY . .
 
+# Entrypoint performs one-time training if model/scaler artifacts are missing.
+RUN chmod +x /app/docker-entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["python3", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/docker-entrypoint.sh"]

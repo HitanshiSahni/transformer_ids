@@ -8,4 +8,7 @@ services:
     ports:
       - "8000:8000"
     gpus: all
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
     restart: unless-stopped
