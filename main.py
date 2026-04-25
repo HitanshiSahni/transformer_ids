@@ -130,7 +130,7 @@ def evaluate_thresholds(model, val_loader, thresholds=[0.5, 0.6, 0.7, 0.8], devi
 def main():
     learning_rate = 5e-4
     batch_size = 256
-    epochs = 3
+    epochs = 10
     dropout_rate = 0.5
     d_model = 32
     heads = 8

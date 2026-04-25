@@ -16,6 +16,9 @@ Running ```python main.py``` will automatically preprocess the Dataset and start
 
 **To run backend with docker desktop:**  
 
-docker compose up --build -d
+docker compose up --build -d  
 
-Checks if models exist first: if they dont, run main.py and then start backend api otherwise start backend api directly
+Checks if models exist first: if they dont, run main.py and then start backend api otherwise start backend api directly  
+
+docker compose logs -f --tail 50 backend  
+to see logs
