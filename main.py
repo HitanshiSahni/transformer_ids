@@ -9,8 +9,10 @@ from sklearn.metrics import classification_report, confusion_matrix, precision_s
 from util.data import load_and_preprocess_data, get_data_loader
 from transformer import RTIDS_Transformer, IDS_Encoder_Only
 
-def eval_model(model, loader, threshold=0.5):
-    model.to("cpu")
+def eval_model(model, loader, threshold=0.5, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     model.eval()
     losses = []
     all_preds = []
@@ -18,7 +20,7 @@ def eval_model(model, loader, threshold=0.5):
     
     with torch.no_grad():
         for data, target in loader:
-            data, target = data.to("cpu"), target.to("cpu")
+            data, target = data.to(device), target.to(device)
             output = model(data)
             
             loss = F.cross_entropy(output, target)
@@ -29,7 +31,7 @@ def eval_model(model, loader, threshold=0.5):
             # If attack probability is below threshold, classify as 1 (Benign), else 0 (Attack)
             preds = (attack_prob < threshold).long().cpu().numpy()
             
-            targets = target.cpu().numpy()
+            targets = target.detach().cpu().numpy()
             
             all_preds.extend(preds)
             all_targets.extend(targets)
@@ -57,8 +59,11 @@ def eval_model(model, loader, threshold=0.5):
     
     return eval_loss, recall
 
-def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_every=100):
+def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_every=100, device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    model.to(device)
     
     best_val_loss = float('inf')
     best_recall = 0.0
@@ -73,7 +78,7 @@ def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_e
         total_loss = 0
         
         for i, (src, trg) in enumerate(train_loader):
-            src, trg = src.to("cpu"), trg.to("cpu")
+            src, trg = src.to(device), trg.to(device)
             
             opt.zero_grad()
             preds = model(src)
@@ -94,7 +99,7 @@ def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_e
                 temp = time.time()
                 
         # End of epoch evaluation
-        val_loss, val_recall = eval_model(model, val_loader)
+        val_loss, val_recall = eval_model(model, val_loader, device=device)
         
         # Early Stopping Logic (Monitor Validation Loss)
         if val_loss < best_val_loss:
@@ -112,12 +117,14 @@ def train_model(model, opt, epochs, train_loader, val_loader, save_path, print_e
                 print(f"\n[!] EARLY STOPPING TRIGGERED AT EPOCH {epoch + 1}")
                 break
 
-def evaluate_thresholds(model, val_loader, thresholds=[0.5, 0.6, 0.7, 0.8]):
+def evaluate_thresholds(model, val_loader, thresholds=[0.5, 0.6, 0.7, 0.8], device=None):
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("\n" + "*"*60)
     print("THRESHOLD COMPARISON EVALUATION")
     print("*"*60)
     for t in thresholds:
-        eval_model(model, val_loader, threshold=t)
+        eval_model(model, val_loader, threshold=t, device=device)
     print("\nRecommendation: Choose the threshold that significantly improves Precision while retaining Recall at an acceptable level. Typically, 0.7 or 0.8 is ideal.")
 
 def main():
@@ -129,14 +136,17 @@ def main():
     heads = 8
     N = 2
     trg_vocab = 2
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     
-    # Set debug=False for legitimate training, memory-safe limits handle the data sizes
-    X_train, X_test, y_train, y_test, scaler = load_and_preprocess_data(debug=True)
+    # Use full dataset preprocessing pipeline (no debug downsampling)
+    X_train, X_test, y_train, y_test, scaler = load_and_preprocess_data(debug=False)
     
     train_loader = get_data_loader(X_train, y_train, batch_size)
     val_loader = get_data_loader(X_test, y_test, batch_size)
 
     model = IDS_Encoder_Only(trg_vocab, d_model, N, heads, dropout_rate)
+    model.to(device)
     save_path = "models/best_model_no_leakage.pt"
 
     for p in model.parameters():
@@ -151,11 +161,11 @@ def main():
     optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     print(f"\nStarting fresh training from scratch for {epochs} epochs...")
-    train_model(model, optim, epochs, train_loader, val_loader, save_path)
+    train_model(model, optim, epochs, train_loader, val_loader, save_path, device=device)
     
     print("\nLoading best model for Threshold Tuning...")
-    model.load_state_dict(torch.load(save_path, weights_only=False))
-    evaluate_thresholds(model, val_loader)
+    model.load_state_dict(torch.load(save_path, map_location=device, weights_only=False))
+    evaluate_thresholds(model, val_loader, device=device)
 
 if __name__ == "__main__":
     main()

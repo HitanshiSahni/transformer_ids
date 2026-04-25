@@ -13,3 +13,10 @@ You will need to install PyTorch to run this Project. Currently only Cuda is sup
 ## Usage
 
 Running ```python main.py``` will automatically preprocess the Dataset and start the Training. This will be removed in the future in favor of seperate methods to Preprocess and store the data, Train the model and Evaluate the model. 
+
+**To run with docker desktop:**  
+docker run --rm --gpus all -p 8000:8000 transformer-ids-backend:cuda  
+
+or  
+
+docker compose up --build -d
