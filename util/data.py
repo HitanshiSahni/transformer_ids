@@ -27,7 +27,16 @@ def load_and_preprocess_data(path='data/', debug=False):
     if not csv_files:
         raise FileNotFoundError(f"No CSV files found in {path}")
         
-    dataframes = [pd.read_csv(f) for f in csv_files]
+    dataframes = []
+    nrows = 5000 if debug else None
+    for f in csv_files:
+        d = pd.read_csv(f, nrows=nrows)
+        for c in d.select_dtypes(include=['float64']).columns:
+            d[c] = d[c].astype('float32')
+        for c in d.select_dtypes(include=['int64']).columns:
+            d[c] = d[c].astype('int32')
+        dataframes.append(d)
+        
     df = pd.concat(dataframes, ignore_index=True)
     df.columns = df.columns.str.strip()
     
@@ -80,7 +89,7 @@ def load_and_preprocess_data(path='data/', debug=False):
     current_benign = np.sum(y_train_res == 1)
     target_attack_smote = max(limit_attack, current_attack) # Boost attacks if below 50k limit
     
-    if target_attack_smote > current_attack:
+    if target_attack_smote > current_attack and current_attack > 5:
         smote = SMOTE(sampling_strategy={1: current_benign, 0: target_attack_smote}, random_state=42)
         X_train_bal, y_train_bal = smote.fit_resample(X_train_res, y_train_res)
     else:

@@ -1,3 +1,7 @@
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -27,7 +31,7 @@ model = IDS_Encoder_Only(trg_vocab, d_model, N, heads, dropout_rate)
 model.eval()
 
 # Load Weights
-MODEL_PATH = "models/best_model_no_leakage.pt"
+MODEL_PATH = "models/best_model.pt"
 SCALER_PATH = "data/preprocessed/scaler.save"
 
 # Threshold Tuning (Adjustable to favor precision vs recall)

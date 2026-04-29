@@ -130,31 +130,23 @@ def main():
     N = 2
     trg_vocab = 2
     
-    # Set debug=False for legitimate training, memory-safe limits handle the data sizes
-    X_train, X_test, y_train, y_test, scaler = load_and_preprocess_data(debug=True)
+    # Set debug=False to evaluate on the full dataset
+    _, X_test, _, y_test, scaler = load_and_preprocess_data(debug=True)
     
-    train_loader = get_data_loader(X_train, y_train, batch_size)
     val_loader = get_data_loader(X_test, y_test, batch_size)
 
     model = IDS_Encoder_Only(trg_vocab, d_model, N, heads, dropout_rate)
-    save_path = "models/best_model_no_leakage.pt"
+    load_path = "models/best_model.pt"
 
-    for p in model.parameters():
-        if p.dim() > 1:
-            nn.init.xavier_uniform_(p)
-            
+    print(f"\nLoading model from {load_path} for Evaluation...")
     try:
-        summary(model, input_size=(78,))
+        model.load_state_dict(torch.load(load_path, weights_only=False, map_location="cpu"))
+        print("Model loaded successfully.")
     except Exception as e:
-        pass
-    
-    optim = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    print(f"\nStarting fresh training from scratch for {epochs} epochs...")
-    train_model(model, optim, epochs, train_loader, val_loader, save_path)
-    
-    print("\nLoading best model for Threshold Tuning...")
-    model.load_state_dict(torch.load(save_path, weights_only=False))
+        print(f"Failed to load model: {e}")
+        return
+        
+    print("\nEvaluating model on the test set...")
     evaluate_thresholds(model, val_loader)
 
 if __name__ == "__main__":

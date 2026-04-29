@@ -1,0 +1,6 @@
+$env:OPENBLAS_CORETYPE="HASWELL"
+$env:OPENBLAS_NUM_THREADS="1"
+$env:OMP_NUM_THREADS="1"
+$env:MKL_NUM_THREADS="1"
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+uvicorn app:app --host 127.0.0.1 --port 8000
