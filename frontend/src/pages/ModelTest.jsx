@@ -28,8 +28,8 @@ const ModelTest = () => {
         setResult(res);
         setLoading(false);
       }, 800);
-    } catch (err) {
-      setError('Connection to backend failed. Make sure FastAPI is running.');
+    } catch (error) {
+      setError(error?.message ? `Connection to backend failed. Make sure FastAPI is running. (${error.message})` : 'Connection to backend failed. Make sure FastAPI is running.');
       setLoading(false);
     }
   };

@@ -6,3 +6,4 @@ pretrained
 out.txt
 *.log
 .env
+env

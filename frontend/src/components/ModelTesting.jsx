@@ -25,8 +25,8 @@ const ModelTesting = () => {
                 isAttack: res.prediction.includes('Attack') || res.prediction.includes('Suspicious')
             });
 
-        } catch (err) {
-            setStatus('FATAL: 0x44 API OFFLINE');
+        } catch (error) {
+            setStatus(error?.message ? `FATAL: 0x44 API OFFLINE (${error.message})` : 'FATAL: 0x44 API OFFLINE');
         } finally {
             setLoading(false);
         }
